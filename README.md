@@ -1,6 +1,6 @@
 # S.A.R.A Terminal Interface
 
-S.A.R.A (Solana Automated Rugpull Analyzer) is a tokenized AI assistant built for degen traders. It provides rapid token analysis and insights into Solana memecoins, combining technical know-how with playful, meme-inspired humor. The backend leverages OpenRouter for chat completions and Solsniffer for token data, while offering a retro terminal-like UI for a fun and interactive experience.
+S.A.R.A (Sandbox Anti-Rug Assembly) is a tokenized AI assistant built for degen traders. It provides rapid token analysis and insights into Solana memecoins, combining technical know-how with playful, meme-inspired humor. The backend leverages OpenRouter for chat completions and Solsniffer for token data, while offering a retro terminal-like UI for a fun and interactive experience.
 
 ## Features
 
