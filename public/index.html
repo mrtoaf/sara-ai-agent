@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>S.A.R.A Terminal Interface</title>
+  <style>
+    /* Terminal-like styling */
+    body {
+      background-color: #000;
+      color: #0f0;
+      font-family: "Courier New", monospace;
+      margin: 0;
+      padding: 20px;
+    }
+    #terminal {
+      height: calc(100vh - 60px);
+      overflow-y: auto;
+      white-space: pre-wrap;
+      margin-bottom: 10px;
+      scroll-behavior: smooth;
+    }
+    .input-line {
+      display: flex;
+      align-items: center;
+    }
+    .prompt {
+      margin-right: 5px;
+    }
+    input[type="text"] {
+      background-color: #000;
+      border: none;
+      outline: none;
+      color: #0f0;
+      flex: 1;
+      font-family: "Courier New", monospace;
+      font-size: 1em;
+    }
+    form {
+      margin: 0;
+    }
+    /* Fade-in animation for appended lines */
+    .fade-in {
+      opacity: 0;
+      animation: fadeIn 0.5s forwards;
+    }
+    @keyframes fadeIn {
+      to { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div id="terminal"></div>
+  <form id="inputForm" class="input-line">
+    <span id="prompt" class="prompt">Enter contract address:</span>
+    <input type="text" id="terminalInput" autocomplete="off" autofocus />
+  </form>
+
+  <script>
+    // ===============================
+    // Global Terminal & State Variables
+    // ===============================
+    const terminal = document.getElementById('terminal');
+    const inputForm = document.getElementById('inputForm');
+    const terminalInput = document.getElementById('terminalInput');
+    const promptSpan = document.getElementById('prompt');
+
+    let terminalState = 'enterAddress'; // 'enterAddress' or 'chat'
+    let tokenAddress = '';
+    let conversationHistory = [];
+    let initialAnalysis = ""; // For token analysis
+
+    // Loading indicator variables (for ASCII art loading)
+    let loadingInterval = null;
+    let loadingElement = null;
+
+    // Global variable for switching to Blackjack minigame
+    let gameMode = null; // null or "blackjack"
+
+    // Blackjack game state object.
+    // When starting the game, if balance already exists it persists.
+    let blackjackGame = null;
+
+    // ===============================
+    // Helper Functions (General)
+    // ===============================
+    function appendLine(text) {
+      const line = document.createElement('div');
+      line.textContent = text;
+      line.classList.add('fade-in');
+      terminal.appendChild(line);
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+
+    function appendTypewriterLine(text, callback) {
+      const line = document.createElement('div');
+      line.classList.add('fade-in');
+      terminal.appendChild(line);
+      let i = 0;
+      function type() {
+        if (i < text.length) {
+          line.textContent += text.charAt(i);
+          i++;
+          setTimeout(type, 10); // 20ms per character
+        } else if (callback) {
+          callback();
+        }
+        terminal.scrollTop = terminal.scrollHeight;
+      }
+      type();
+    }
+
+    function showAsciiArtLoading() {
+      loadingElement = document.createElement('div');
+      loadingElement.classList.add('fade-in');
+      terminal.appendChild(loadingElement);
+      terminal.scrollTop = terminal.scrollHeight;
+      const frames = [
+        "  +---------------------+\n  |  S.A.R.A Loading   |\n  |      [          ]  |\n  +---------------------+",
+        "  +---------------------+\n  |  S.A.R.A Loading   |\n  |      [=         ]  |\n  +---------------------+",
+        "  +---------------------+\n  |  S.A.R.A Loading   |\n  |      [==        ]  |\n  +---------------------+",
+        "  +---------------------+\n  |  S.A.R.A Loading   |\n  |      [===       ]  |\n  +---------------------+",
+        "  +---------------------+\n  |  S.A.R.A Loading   |\n  |      [====      ]  |\n  +---------------------+",
+        "  +---------------------+\n  |  S.A.R.A Loading   |\n  |      [=====     ]  |\n  +---------------------+"
+      ];
+      let frameIndex = 0;
+      loadingInterval = setInterval(() => {
+        loadingElement.textContent = frames[frameIndex];
+        frameIndex = (frameIndex + 1) % frames.length;
+        terminal.scrollTop = terminal.scrollHeight;
+      }, 300);
+    }
+
+    function hideAsciiArtLoading() {
+      if (loadingInterval !== null) {
+        clearInterval(loadingInterval);
+        loadingInterval = null;
+      }
+      if (loadingElement) {
+        terminal.removeChild(loadingElement);
+        loadingElement = null;
+      }
+    }
+
+    function displayHeader() {
+      appendLine("=========================================");
+      appendLine("      WELCOME TO S.A.R.A TERMINAL        ");
+      appendLine("=========================================");
+      appendLine("");
+    }
+
+    function displayHelp() {
+      appendLine("");
+      appendLine("=========================================");
+      appendLine("                HELP MENU                ");
+      appendLine("=========================================");
+      appendLine(" clear    - Clears the terminal screen");
+      appendLine(" analysis - Reprints the initial token analysis");
+      appendLine(" help     - Shows this help menu");
+      appendLine(" reset    - Resets the conversation and returns to contract address entry");
+      appendLine(" degen    - Starts the Blackjack minigame");
+      appendLine("=========================================");
+      appendLine("Type your query after the prompt (user ~ %)");
+    }
+
+    // A helper function to detect if input appears to be a contract address.
+    function isPossibleContractAddress(input) {
+      return /^[A-Za-z0-9]{32,44}$/.test(input);
+    }
+
+    // ===============================
+    // Main Process Input Function (Normal Mode)
+    // ===============================
+    async function processInput(input) {
+      const trimmedInput = input.trim();
+
+      // If in blackjack mode, forward input to blackjack processor.
+      if (gameMode === "blackjack") {
+        processBlackjackInput(trimmedInput);
+        return;
+      }
+
+      // Global commands
+      if (trimmedInput.toLowerCase() === "clear") {
+        terminal.innerHTML = "";
+        return;
+      }
+      if (trimmedInput.toLowerCase() === "reset") {
+        terminal.innerHTML = "";
+        terminalState = 'enterAddress';
+        tokenAddress = '';
+        conversationHistory = [];
+        initialAnalysis = "";
+        promptSpan.textContent = "Enter contract address:";
+        appendLine("System: Terminal reset.");
+        return;
+      }
+      if (trimmedInput.toLowerCase() === "analysis") {
+        if (initialAnalysis) {
+          appendLine("S.A.R.A: " + initialAnalysis);
+        } else {
+          appendLine("No analysis available yet.");
+        }
+        return;
+      }
+      if (trimmedInput.toLowerCase() === "help") {
+        displayHelp();
+        return;
+      }
+      if (trimmedInput.toLowerCase() === "degen") {
+        // Start Blackjack minigame
+        if (!gameMode) {
+          gameMode = "blackjack";
+          startBlackjackGame();
+          return;
+        }
+      }
+      // In chat mode, if input looks like a contract address, remind the user.
+      if (terminalState === 'chat' && isPossibleContractAddress(trimmedInput)) {
+        appendLine("System: You're already analyzing one coin. Please run the reset command if you'd like to analyze another token.");
+        return;
+      }
+
+      // Process input normally for token analysis.
+      if (terminalState === 'enterAddress') {
+        tokenAddress = trimmedInput;
+        if (!tokenAddress) {
+          appendLine("Please enter a valid contract address.");
+          return;
+        }
+        appendLine("You entered: " + tokenAddress);
+        appendLine("");
+        appendLine("Initializing conversation with token analysis...");
+
+        const payload = { tokenAddress: tokenAddress, messages: [] };
+        try {
+          showAsciiArtLoading();
+          const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          hideAsciiArtLoading();
+          if (!response.ok) {
+            const errorData = await response.json();
+            appendLine("Error: " + errorData.error);
+            return;
+          }
+          const data = await response.json();
+          const agentReply = data.choices[0].message.content;
+          conversationHistory.push({ role: 'assistant', content: agentReply });
+          initialAnalysis = agentReply;
+          appendTypewriterLine("S.A.R.A: " + agentReply, displayHelp);
+        } catch (error) {
+          hideAsciiArtLoading();
+          appendLine("Error: " + error.message);
+        }
+        terminalState = 'chat';
+        promptSpan.textContent = "user ~ %";
+      } else if (terminalState === 'chat') {
+        appendLine("user ~ % " + trimmedInput);
+        conversationHistory.push({ role: 'user', content: trimmedInput });
+        const payload = { tokenAddress: tokenAddress, messages: conversationHistory };
+        try {
+          showAsciiArtLoading();
+          const response = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          hideAsciiArtLoading();
+          if (!response.ok) {
+            const errorData = await response.json();
+            appendLine("Error: " + errorData.error);
+            return;
+          }
+          const data = await response.json();
+          const agentReply = data.choices[0].message.content;
+          conversationHistory.push({ role: 'assistant', content: agentReply });
+          appendTypewriterLine("S.A.R.A: " + agentReply);
+        } catch (error) {
+          hideAsciiArtLoading();
+          appendLine("Error: " + error.message);
+        }
+      }
+    }
+
+    // ===============================
+    // ASCII Art Card Functions (for Blackjack)
+    // ===============================
+    function padRight(str, length) {
+      return str + " ".repeat(length - str.length);
+    }
+    function padLeft(str, length) {
+      return " ".repeat(length - str.length) + str;
+    }
+    // Returns an array of strings representing a card.
+    function asciiCard(rank) {
+      const line1 = "┌─────┐";
+      const line2 = "│" + padRight(rank, 5) + "│";
+      const line3 = "│     │";
+      const line4 = "│" + padLeft(rank, 5) + "│";
+      const line5 = "└─────┘";
+      return [line1, line2, line3, line4, line5];
+    }
+    // Returns a multi-line string showing the cards side by side.
+    function asciiHand(hand) {
+      const cardLines = hand.map(card => asciiCard(card));
+      let result = [];
+      for (let i = 0; i < 5; i++) {
+        const line = cardLines.map(card => card[i]).join("  ");
+        result.push(line);
+      }
+      return result.join("\n");
+    }
+    // Displays a hand with a label and total value.
+    function displayHand(label, hand) {
+      const total = getHandValue(hand);
+      appendLine(label + " (" + total + "):");
+      asciiHand(hand).split("\n").forEach(line => appendLine(line));
+    }
+
+    // ===============================
+    // Blackjack Minigame Functions & Logic
+    // ===============================
+    // Returns a deck (ignoring suits) with 4 copies of each rank.
+    function generateDeck() {
+      const ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
+      const deck = [];
+      for (let i = 0; i < 4; i++) {
+        for (let rank of ranks) {
+          deck.push(rank);
+        }
+      }
+      return deck;
+    }
+    function shuffleDeck(deck) {
+      for (let i = deck.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [deck[i], deck[j]] = [deck[j], deck[i]];
+      }
+    }
+    function dealCard(deck) {
+      return deck.pop();
+    }
+    function getHandValue(hand) {
+      let total = 0;
+      let aces = 0;
+      for (let card of hand) {
+        if (card === "A") {
+          total += 11;
+          aces++;
+        } else if (["K", "Q", "J"].includes(card)) {
+          total += 10;
+        } else {
+          total += parseInt(card);
+        }
+      }
+      while (total > 21 && aces > 0) {
+        total -= 10;
+        aces--;
+      }
+      return total;
+    }
+
+    // Start a new hand of Blackjack. Balance persists across hands.
+    function startBlackjackGame() {
+      // Initialize game state if not already set.
+      if (!blackjackGame) {
+        blackjackGame = { balance: 100 };
+      }
+      blackjackGame.deck = generateDeck();
+      shuffleDeck(blackjackGame.deck);
+      blackjackGame.bet = 0;
+      blackjackGame.insuranceBet = 0;
+      blackjackGame.isSplit = false;
+      blackjackGame.playerHands = []; // If splitting occurs
+      blackjackGame.currentHandIndex = 0;
+      blackjackGame.dealerHand = [];
+      // Deal new hand variables.
+      appendLine("=========================================");
+      appendLine("Your current balance: " + blackjackGame.balance + " SOL");
+      appendLine("Starting a new hand.");
+      appendLine("Please place your bet (integer amount).");
+      blackjackGame.phase = "betting";
+      promptSpan.textContent = "blackjack ~ %";
+    }
+
+    // Process input when in Blackjack mode.
+    function processBlackjackInput(input) {
+      const trimmedInput = input.trim().toLowerCase();
+
+      // Allow exit anytime.
+      if (trimmedInput === "exit") {
+        appendLine("Exiting Blackjack... Returning to normal mode.");
+        gameMode = null;
+        blackjackGame = null;
+        promptSpan.textContent = (terminalState === 'enterAddress') ? "Enter contract address:" : "user ~ %";
+        return;
+      }
+
+      // If input looks like a contract address, warn the user.
+      if (isPossibleContractAddress(trimmedInput)) {
+        appendLine("System: You're currently playing Blackjack. Type 'exit' to quit the game.");
+        return;
+      }
+
+      // Process based on the current blackjack phase.
+      if (blackjackGame.phase === "betting") {
+        const bet = parseInt(trimmedInput);
+        if (isNaN(bet) || bet <= 0 || bet > blackjackGame.balance) {
+          appendLine("Invalid bet. Please enter a positive integer up to " + blackjackGame.balance + ".");
+          return;
+        }
+        blackjackGame.bet = bet;
+        blackjackGame.balance -= bet;
+        appendLine("You bet " + bet + " SOL.");
+        // Deal two cards to player and dealer.
+        const playerHand = [dealCard(blackjackGame.deck), dealCard(blackjackGame.deck)];
+        blackjackGame.playerHands = [playerHand];  // Start with one hand.
+        blackjackGame.dealerHand = [dealCard(blackjackGame.deck), dealCard(blackjackGame.deck)];
+        // Display player's hand:
+        displayHand("Your hand", playerHand);
+        // Display dealer's upcard:
+        appendLine("Dealer shows:");
+        const dealerUpcardArt = asciiHand([blackjackGame.dealerHand[0]]);
+        dealerUpcardArt.split("\n").forEach(line => appendLine(line));
+        // Offer insurance if dealer's upcard is an Ace.
+        if (blackjackGame.dealerHand[0] === "A") {
+          blackjackGame.phase = "insurance";
+          appendLine("Dealer shows an Ace. Would you like insurance? (yes/no)");
+          return;
+        } else {
+          blackjackGame.phase = "checkBlackjack";
+          processBlackjackInput(""); // Proceed immediately.
+          return;
+        }
+      }
+
+      if (blackjackGame.phase === "insurance") {
+        if (trimmedInput === "yes") {
+          const insBet = Math.floor(blackjackGame.bet / 2);
+          if (blackjackGame.balance < insBet) {
+            appendLine("Insufficient balance for insurance. Continuing without insurance.");
+            blackjackGame.insuranceBet = 0;
+          } else {
+            blackjackGame.insuranceBet = insBet;
+            blackjackGame.balance -= insBet;
+            appendLine("Insurance bet of " + insBet + " SOL placed.");
+          }
+        } else {
+          appendLine("No insurance taken.");
+          blackjackGame.insuranceBet = 0;
+        }
+        blackjackGame.phase = "checkBlackjack";
+        processBlackjackInput(""); // Continue.
+        return;
+      }
+
+      if (blackjackGame.phase === "checkBlackjack") {
+        // Check for natural blackjack in player's first hand.
+        const playerHand = blackjackGame.playerHands[0];
+        const playerValue = getHandValue(playerHand);
+        const dealerValue = getHandValue(blackjackGame.dealerHand);
+        if (playerHand.length === 2 && playerValue === 21) {
+          appendLine("Natural Blackjack!");
+          // Check if dealer also has blackjack.
+          if (blackjackGame.dealerHand.length === 2 && dealerValue === 21) {
+            appendLine("Push. Your bet is returned.");
+            blackjackGame.balance += blackjackGame.bet;
+            if (blackjackGame.insuranceBet > 0) {
+              blackjackGame.balance += blackjackGame.insuranceBet * 2;
+            }
+          } else {
+            const payout = Math.floor(blackjackGame.bet * 1.5);
+            appendLine("You win " + payout + " SOL on blackjack!");
+            blackjackGame.balance += blackjackGame.bet + payout;
+          }
+          blackjackGame.phase = "handOver";
+          endHand();
+          return;
+        } else {
+          // If no blackjack, continue to player turn.
+          blackjackGame.phase = "playerTurn";
+          if (playerHand.length === 2 && playerHand[0] === playerHand[1]) {
+            appendLine("You can 'split' your hand. Or type 'hit' or 'stand'.");
+          } else {
+            appendLine("Type 'hit' to draw a card, 'stand' to hold, or 'double' to double down (if sufficient balance).");
+          }
+          return;
+        }
+      }
+
+      if (blackjackGame.phase === "playerTurn") {
+        const playerHand = blackjackGame.playerHands[0];
+        if (trimmedInput === "hit") {
+          const card = dealCard(blackjackGame.deck);
+          playerHand.push(card);
+          appendLine("You drew: " + card);
+          displayHand("Your hand", playerHand);
+          const value = getHandValue(playerHand);
+          if (value > 21) {
+            appendLine("Bust! You lose your bet.");
+            blackjackGame.phase = "handOver";
+            endHand();
+          } else {
+            appendLine("Type 'hit', 'stand', 'double'" + 
+              (playerHand.length === 2 && playerHand[0] === playerHand[1] ? ", or 'split'" : "") + ".");
+          }
+          return;
+        } else if (trimmedInput === "stand") {
+          blackjackGame.phase = "dealerTurn";
+          processDealerTurn();
+          return;
+        } else if (trimmedInput === "double") {
+          if (blackjackGame.balance < blackjackGame.bet) {
+            appendLine("Insufficient balance to double.");
+            return;
+          }
+          blackjackGame.balance -= blackjackGame.bet;
+          blackjackGame.bet *= 2;
+          appendLine("You double down. Your bet is now " + blackjackGame.bet + " SOL.");
+          const card = dealCard(blackjackGame.deck);
+          playerHand.push(card);
+          appendLine("You drew: " + card);
+          displayHand("Your hand", playerHand);
+          blackjackGame.phase = "dealerTurn";
+          processDealerTurn();
+          return;
+        } else if (trimmedInput === "split") {
+          if (playerHand.length === 2 && playerHand[0] === playerHand[1]) {
+            if (blackjackGame.balance < blackjackGame.bet) {
+              appendLine("Insufficient balance to split.");
+              return;
+            }
+            blackjackGame.balance -= blackjackGame.bet;
+            blackjackGame.isSplit = true;
+            const hand1 = [playerHand[0], dealCard(blackjackGame.deck)];
+            const hand2 = [playerHand[1], dealCard(blackjackGame.deck)];
+            blackjackGame.playerHands = [hand1, hand2];
+            blackjackGame.currentHandIndex = 0;
+            appendLine("Hand split! Now playing first hand:");
+            displayHand("Your hand", hand1);
+            appendLine("Type 'hit' or 'stand' for this hand.");
+            blackjackGame.phase = "playerTurnSplit";
+            return;
+          } else {
+            appendLine("You cannot split this hand.");
+            return;
+          }
+        } else {
+          appendLine("Invalid input. Type 'hit', 'stand', 'double'" + 
+            (playerHand.length === 2 && playerHand[0] === playerHand[1] ? ", or 'split'" : "") + ".");
+          return;
+        }
+      }
+
+      if (blackjackGame.phase === "playerTurnSplit") {
+        const currentHand = blackjackGame.playerHands[blackjackGame.currentHandIndex];
+        if (trimmedInput === "hit") {
+          const card = dealCard(blackjackGame.deck);
+          currentHand.push(card);
+          appendLine("For hand " + (blackjackGame.currentHandIndex + 1) + ", you drew: " + card);
+          displayHand("Hand " + (blackjackGame.currentHandIndex + 1), currentHand);
+          if (getHandValue(currentHand) > 21) {
+            appendLine("Hand " + (blackjackGame.currentHandIndex + 1) + " busts!");
+            blackjackGame.currentHandIndex++;
+            if (blackjackGame.currentHandIndex < blackjackGame.playerHands.length) {
+              appendLine("Now playing hand " + (blackjackGame.currentHandIndex + 1) + ".");
+              displayHand("Hand " + (blackjackGame.currentHandIndex + 1), blackjackGame.playerHands[blackjackGame.currentHandIndex]);
+            } else {
+              blackjackGame.phase = "dealerTurn";
+              processDealerTurn();
+            }
+          } else {
+            appendLine("For hand " + (blackjackGame.currentHandIndex + 1) + ", type 'hit' or 'stand'.");
+          }
+          return;
+        } else if (trimmedInput === "stand") {
+          appendLine("You stand on hand " + (blackjackGame.currentHandIndex + 1) + ".");
+          blackjackGame.currentHandIndex++;
+          if (blackjackGame.currentHandIndex < blackjackGame.playerHands.length) {
+            appendLine("Now playing hand " + (blackjackGame.currentHandIndex + 1) + ".");
+            displayHand("Hand " + (blackjackGame.currentHandIndex + 1), blackjackGame.playerHands[blackjackGame.currentHandIndex]);
+            appendLine("Type 'hit' or 'stand' for this hand.");
+          } else {
+            blackjackGame.phase = "dealerTurn";
+            processDealerTurn();
+          }
+          return;
+        } else {
+          appendLine("Invalid input for split hand. Type 'hit' or 'stand'.");
+          return;
+        }
+      }
+    }
+
+    // Process dealer turn.
+    function processDealerTurn() {
+      appendLine("Dealer's turn:");
+      displayHand("Dealer's hand", blackjackGame.dealerHand);
+      while (getHandValue(blackjackGame.dealerHand) < 17) {
+        const card = dealCard(blackjackGame.deck);
+        blackjackGame.dealerHand.push(card);
+        appendLine("Dealer draws: " + card);
+        displayHand("Dealer's hand", blackjackGame.dealerHand);
+      }
+      const dealerTotal = getHandValue(blackjackGame.dealerHand);
+      if (blackjackGame.isSplit) {
+        for (let i = 0; i < blackjackGame.playerHands.length; i++) {
+          const hand = blackjackGame.playerHands[i];
+          const playerTotal = getHandValue(hand);
+          if (playerTotal > 21) {
+            appendLine("Hand " + (i + 1) + " busts. You lose that bet of " + blackjackGame.bet + " SOL.");
+          } else if (dealerTotal > 21 || playerTotal > dealerTotal) {
+            appendLine("Hand " + (i + 1) + " wins! You gain " + blackjackGame.bet + " SOL.");
+            blackjackGame.balance += blackjackGame.bet * 2;
+          } else if (playerTotal === dealerTotal) {
+            appendLine("Hand " + (i + 1) + " pushes. Your bet is returned.");
+            blackjackGame.balance += blackjackGame.bet;
+          } else {
+            appendLine("Hand " + (i + 1) + " loses. You lose your bet of " + blackjackGame.bet + " SOL.");
+          }
+        }
+      } else {
+        const playerTotal = getHandValue(blackjackGame.playerHands[0]);
+        if (playerTotal > 21) {
+          appendLine("Bust! You lose your bet of " + blackjackGame.bet + " SOL.");
+        } else if (dealerTotal > 21 || playerTotal > dealerTotal) {
+          appendLine("You win! You gain " + blackjackGame.bet + " SOL.");
+          blackjackGame.balance += blackjackGame.bet * 2;
+        } else if (playerTotal === dealerTotal) {
+          appendLine("Push. Your bet is returned.");
+          blackjackGame.balance += blackjackGame.bet;
+        } else {
+          appendLine("Dealer wins with " + dealerTotal + " vs your " + playerTotal + ". You lose your bet.");
+        }
+      }
+      blackjackGame.phase = "handOver";
+      endHand();
+    }
+
+    // End the hand: display current balance and prompt for next hand.
+    function endHand() {
+      appendLine("=========================================");
+      appendLine("Hand over. Your current balance: " + blackjackGame.balance + " SOL");
+      appendLine("Type 'play' to start a new hand or 'exit' to quit Blackjack.");
+      blackjackGame.phase = "handOver";
+    }
+
+    // Process input during the handOver phase.
+    function processHandOverInput(input) {
+      const trimmedInput = input.trim().toLowerCase();
+      if (trimmedInput === "play") {
+        startBlackjackGame();
+      } else if (trimmedInput === "exit") {
+        appendLine("Exiting Blackjack... Returning to normal mode.");
+        gameMode = null;
+        blackjackGame = null;
+        promptSpan.textContent = (terminalState === 'enterAddress') ? "Enter contract address:" : "user ~ %";
+      } else {
+        appendLine("Invalid input. Type 'play' to start a new hand or 'exit' to quit Blackjack.");
+      }
+    }
+
+    // Wrapper to handle handOver phase.
+    function processBlackjackInputWrapper(input) {
+      if (blackjackGame.phase === "handOver") {
+        processHandOverInput(input);
+      } else {
+        processBlackjackInput(input);
+      }
+    }
+
+    // ===============================
+    // Event Listener
+    // ===============================
+    inputForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const input = terminalInput.value;
+      terminalInput.value = "";
+      if (gameMode === "blackjack") {
+        processBlackjackInputWrapper(input);
+      } else {
+        processInput(input);
+      }
+    });
+
+    // ===============================
+    // Start the Application
+    // ===============================
+    displayHeader();
+  </script>
+</body>
+</html>
